@@ -21,17 +21,17 @@ ssh deploy@your_server_ip
 sudo nano /etc/ssh/sshd_config
 
 ## Change:
-PermitRootLogin no
-PasswordAuthentication no
+    PermitRootLogin no
+    PasswordAuthentication no
 
 ## Restart SSH:
-sudo systemctl restart ssh
+    sudo systemctl restart ssh
 
 # 4. Enable Firewall (UFW)
-sudo ufw allow OpenSSH
-sudo ufw allow 80
-sudo ufw allow 443
-sudo ufw enable
+    sudo ufw allow OpenSSH
+    sudo ufw allow 80
+    sudo ufw allow 443
+    sudo ufw enable
 
 
 #@ STEP 2 — Install & Secure MySQL
