@@ -1,0 +1,321 @@
+#FINAL FOLDER STRUCTURE (MONOREPO)
+
+Create one GitHub repo like this:
+
+your-project/
+│
+├── backend/
+│   ├── Dockerfile
+│   └── (your node app)
+│
+├── main/
+│   ├── Dockerfile
+│   └── (your nextjs main app)
+│
+├── admin/
+│   ├── Dockerfile
+│   └── (your nextjs admin app)
+│
+├── nginx/
+│   └── default.conf
+│
+├── docker-compose.yml
+└── .github/
+    └── workflows/
+        └── deploy.yml
+
+
+Push this entire structure to GitHub.
+
+#STEP 1 — BACKEND (Node.js)
+##backend/Dockerfile
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install --production
+
+COPY . .
+
+EXPOSE 5000
+
+CMD ["node", "server.js"]
+
+##backend/.dockerignore
+node_modules
+.env
+.git
+
+# STEP 2 — NEXT.JS MAIN WEBSITE
+##main/Dockerfile
+# Build stage
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install
+
+COPY . .
+RUN npm run build
+
+# Production stage
+FROM node:20-alpine
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY --from=builder /app ./
+
+EXPOSE 3000
+
+CMD ["npm", "start"]
+
+## main/.dockerignore
+node_modules
+.next
+.env
+.git
+
+# STEP 3 — NEXT.JS ADMIN PANEL
+## admin/Dockerfile
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install
+
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY --from=builder /app ./
+
+EXPOSE 3000
+
+CMD ["npm", "start"]
+
+## admin/.dockerignore
+node_modules
+.next
+.env
+.git
+
+# STEP 4 — NGINX REVERSE PROXY
+##nginx/default.conf
+
+##Replace with your real domain.
+
+server {
+    listen 80;
+    server_name yourdomain.com;
+
+    location / {
+        proxy_pass http://main:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /api/ {
+        proxy_pass http://backend:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+
+server {
+    listen 80;
+    server_name admin.yourdomain.com;
+
+    location / {
+        proxy_pass http://admin:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+
+# STEP 5 — DOCKER COMPOSE (ROOT)
+##docker-compose.yml
+version: "3.9"
+
+services:
+  backend:
+    build: ./backend
+    container_name: backend
+    restart: always
+    env_file:
+      - ./backend/.env
+    networks:
+      - app-network
+
+  main:
+    build: ./main
+    container_name: main
+    restart: always
+    networks:
+      - app-network
+
+  admin:
+    build: ./admin
+    container_name: admin
+    restart: always
+    networks:
+      - app-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - backend
+      - main
+      - admin
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+# STEP 6 — VPS SETUP (ONE TIME)
+
+##SSH into droplet:
+
+adduser deploy
+usermod -aG sudo deploy
+usermod -aG docker deploy
+
+
+##Install Docker:
+
+curl -fsSL https://get.docker.com | sh
+apt install docker-compose-plugin
+
+
+##Clone repo:
+
+mkdir -p /var/www/app
+cd /var/www/app
+git clone https://github.com/yourusername/yourrepo.git .
+
+
+##Run:
+
+docker compose up -d --build
+
+
+##Now app is running.
+
+# STEP 7 — GITHUB CI/CD AUTO DEPLOY
+
+##Create:
+
+.github/workflows/deploy.yml
+name: Deploy to DigitalOcean
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SSH Deploy
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: deploy
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /var/www/app
+            git pull origin main
+            docker compose down
+            docker compose up -d --build
+
+##Add GitHub Secrets
+
+##Go to GitHub → Settings → Secrets:
+
+##Add:
+
+SERVER_IP
+SSH_PRIVATE_KEY
+
+
+##Now every push to main branch = auto deploy 🔥
+
+# STEP 8 — SECURITY HARDENING
+1️⃣ Firewall
+ufw allow OpenSSH
+ufw allow 80
+ufw allow 443
+ufw enable
+
+2️⃣ Disable Root Login
+
+##Edit:
+
+nano /etc/ssh/sshd_config
+
+
+##Change:
+
+PermitRootLogin no
+PasswordAuthentication no
+
+
+##Restart:
+
+systemctl restart ssh
+
+3️⃣ Install Fail2Ban
+apt install fail2ban
+systemctl enable fail2ban
+
+
+##Blocks brute force bots.
+
+4️⃣ Cloudflare Setup
+
+## On Cloudflare dashboard enable:
+
+## Proxy ON (orange cloud)
+
+## SSL → Full (Strict)
+
+## Bot Fight Mode
+
+## WAF
+
+## Rate Limiting for /api/*
+
+## DDoS protection
+
+# FINAL SECURITY LAYER
+
+Your stack becomes:
+
+Cloudflare
+→ Nginx
+→ Docker isolated containers
+→ UFW firewall
+→ Fail2Ban
+→ SSH key only
+
+#Bots cannot install malware unless you manually run unsafe scripts.
